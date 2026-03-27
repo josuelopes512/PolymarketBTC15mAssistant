@@ -1,7 +1,7 @@
 ---
 name: polymarket-browser-trader
 description: Monitora continuamente mercados Polymarket BTC Up/Down 5m, calcula o tempo restante e executa o trade automaticamente quando a janela de entrada for atingida, usando a sessão existente do Microsoft Edge do usuário.
-version: 1.2.0
+version: 1.3.0
 metadata:
   openclaw:
     requires:
@@ -9,38 +9,87 @@ metadata:
         - node
         - bash
         - bc
+        - jq
       env:
         - STAKE_USD
         - MAX_ENTRY_PRICE
         - MIN_LIQUIDITY
 ---
 
-Use esta skill para monitorar, aguardar e executar trades na Polymarket via navegador no macOS, usando a sessão existente do Microsoft Edge do usuário.
+## Estrutura do JSON do indicador (referência canônica)
 
-Importante:
-- Use sempre o browser profile `edge-user`.
-- Nunca use o profile `openclaw`.
-- O indicador apenas consulta o sinal; a execução da ordem deve ser feita pela UI da Polymarket no navegador.
-- O valor da ordem deve ser sempre de **$1**.
-- A skill deve **ficar em loop de espera ativa** consultando o indicador a cada 3 segundos até que a janela de entrada seja atingida.
-- Só operar quando `timeLeftSec` estiver entre **30s e 55s** (janela de entrada).
-- Só operar quando o preço do lado escolhido estiver entre **0.80 e 0.88**.
-- Nunca operar duas vezes no mesmo `marketId`.
+```json
+{
+  "ok": true,
+  "marketId": "1734030",
+  "marketSlug": "btc-updown-5m-1774638300",
+  "timeLeftSec": 43,
+  "currentPrice": null,
+  "priceToBeat": null,
+  "upPrice": 0.12,
+  "downPrice": 0.87,
+  "liquidity": 24940.4653,
+  "taLongPct": 48,
+  "taShortPct": 52,
+  "heiken": "green",
+  "rsi": 36.348967896289196,
+  "macd": "bearish",
+  "action": "NO_TRADE",
+  "side": null,
+  "phase": "LATE",
+  "strength": null,
+  "edgeUp": 0.3615196248196248,
+  "edgeDown": -0.36151962481962474,
+  "modelUp": 0.48273174603174,
+  "modelDown": 0.51726825396825
+}
+```
+
+### Campos utilizados na decisão
+
+| Campo            | Tipo         | Uso                                                              |
+|------------------|--------------|------------------------------------------------------------------|
+| `ok`             | bool         | Se `false`, abortar imediatamente                                |
+| `marketId`       | string       | Identificador único do mercado (deduplicação)                    |
+| `marketSlug`     | string       | Slug para navegar até a página do mercado na Polymarket          |
+| `timeLeftSec`    | int          | Tempo restante — controla a janela de entrada                    |
+| `currentPrice`   | float\|null  | Preço atual do BTC — se `null`, desconsiderar sinal 5            |
+| `priceToBeat`    | float\|null  | Preço alvo do mercado — se `null`, desconsiderar sinal 5         |
+| `upPrice`        | float        | Preço Polymarket do lado UP                                      |
+| `downPrice`      | float        | Preço Polymarket do lado DOWN                                    |
+| `taLongPct`      | int          | % TA Predict para LONG                                           |
+| `taShortPct`     | int          | % TA Predict para SHORT                                          |
+| `heiken`         | string       | `"red"`, `"red x2"`, `"green"`, `"green x3"`…                   |
+| `rsi`            | float        | RSI atual                                                        |
+| `macd`           | string       | `"bearish"`, `"bearish (expanding)"`, `"bullish"`…               |
+| `phase`          | string       | `"EARLY"` / `"MID"` / `"LATE"` — apenas informativo             |
+
+> **Ignorados na decisão:** `action`, `side`, `strength`, `edgeUp`, `edgeDown`, `modelUp`, `modelDown`, `liquidity`
+> A skill decide de forma independente — nunca delega para `action` ou `side` do indicador.
 
 ---
 
-## Critérios de decisão (todos devem estar alinhados para SIM)
+## Critérios de decisão (TODOS devem ser satisfeitos)
 
-1. **Preço Polymarket** da direção escolhida entre **0.80 e 0.88**
-2. **Pelo menos 4 dos 5 sinais** apontam para a mesma direção:
-   - **TA Predict:** SHORT > 55% → DOWN | LONG > 55% → UP
-   - **Heiken Ashi:** red → DOWN | green → UP *(peso maior se x2 ou x3)*
-   - **RSI:** ↓ abaixo de 45 → DOWN | ↑ acima de 55 → UP
-   - **MACD:** bearish → DOWN | bullish → UP
-   - **currentPrice vs priceToBeat:** DOWN se `currentPrice < priceToBeat` | UP se `currentPrice > priceToBeat`
-3. **timeLeftSec entre 30s e 55s** (janela de entrada)
+### 1. Preço do lado escolhido entre 0.80 e 0.88
+- UP → verificar `upPrice`
+- DOWN → verificar `downPrice`
 
-Caso algum critério falhe → **não operar**.
+### 2. Sinais técnicos
+
+| Sinal                        | DOWN                              | UP                               |
+|------------------------------|-----------------------------------|----------------------------------|
+| **TA Predict**               | `taShortPct > 55`                 | `taLongPct > 55`                 |
+| **Heiken Ashi**              | `heiken` começa com `"red"`       | `heiken` começa com `"green"`    |
+| **RSI**                      | `rsi < 45`                        | `rsi > 55`                       |
+| **MACD**                     | `macd` começa com `"bearish"`     | `macd` começa com `"bullish"`    |
+| **currentPrice / priceToBeat** | `currentPrice < priceToBeat`    | `currentPrice > priceToBeat`     |
+
+**Mínimo necessário:**
+- Se `currentPrice` e `priceToBeat` ambos presentes → exigir **4 de 5** sinais
+- Se qualquer um for `null` → sinal 5 desconsiderado, exigir **3 de 4** sinais restantes
+
+### 3. Janela de tempo: `30 ≤ timeLeftSec ≤ 55`
 
 ---
 
@@ -48,174 +97,170 @@ Caso algum critério falhe → **não operar**.
 
 ### Fase 1 — Inicialização
 
-1. Garanta que o Microsoft Edge esteja acessível via profile `edge-user`.
-   Se não responder, execute: `edge-debug`
-
-2. Abra `https://polymarket.com` via browser tool com profile `edge-user`.
-
-3. Inicialize o arquivo de mercados já operados (para evitar duplicatas):
-   ```bash
-   touch "$HOME/.polymarket-traded-markets"
-   ```
+```bash
+touch "$HOME/.polymarket-traded-markets"
+# Garantir Edge acessível via profile edge-user
+# Se não responder: edge-debug
+```
 
 ---
 
-### Fase 2 — Loop de monitoramento (espera ativa)
-
-Execute o loop abaixo **continuamente**, com intervalo de **3 segundos** entre cada iteração:
+### Fase 2 — Loop de monitoramento (espera ativa, poll a cada 3s)
 
 ```bash
-POLL_INTERVAL=3
+INDICATOR="$HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh"
+POLL=3
 ENTRY_MIN=30
 ENTRY_MAX=55
 PRICE_MIN=0.80
 PRICE_MAX=0.88
-TRADED_FILE="$HOME/.polymarket-traded-markets"
+TRADED="$HOME/.polymarket-traded-markets"
 
 while true; do
-  # 1. Consultar o indicador
-  JSON=$(bash "$HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh")
 
-  # 2. Extrair campos
-  TIME_LEFT=$(echo "$JSON" | jq '.timeLeftSec')
-  MARKET_ID=$(echo "$JSON" | jq -r '.marketId')
-  UP_PRICE=$(echo "$JSON"  | jq '.upPrice')
-  DOWN_PRICE=$(echo "$JSON" | jq '.downPrice')
-  TA_LONG=$(echo "$JSON"   | jq '.taLongPct')
-  TA_SHORT=$(echo "$JSON"  | jq '.taShortPct')
-  HEIKEN=$(echo "$JSON"    | jq -r '.heiken')
-  RSI=$(echo "$JSON"       | jq '.rsi')
-  MACD=$(echo "$JSON"      | jq -r '.macd')
-  CURRENT=$(echo "$JSON"   | jq '.currentPrice')
-  TO_BEAT=$(echo "$JSON"   | jq '.priceToBeat')
+  # 1. Consultar indicador
+  JSON=$(bash "$INDICATOR" 2>/dev/null)
 
-  echo "[$(date '+%H:%M:%S')] timeLeft=${TIME_LEFT}s | market=${MARKET_ID}"
+  OK=$(echo "$JSON"       | jq -r '.ok')
+  TIME=$(echo "$JSON"     | jq    '.timeLeftSec')
+  MID=$(echo "$JSON"      | jq -r '.marketId')
+  SLUG=$(echo "$JSON"     | jq -r '.marketSlug')
+  UP_P=$(echo "$JSON"     | jq    '.upPrice')
+  DOWN_P=$(echo "$JSON"   | jq    '.downPrice')
+  TA_LONG=$(echo "$JSON"  | jq    '.taLongPct')
+  TA_SHORT=$(echo "$JSON" | jq    '.taShortPct')
+  HEIKEN=$(echo "$JSON"   | jq -r '.heiken')
+  RSI=$(echo "$JSON"      | jq    '.rsi')
+  MACD=$(echo "$JSON"     | jq -r '.macd')
+  CUR=$(echo "$JSON"      | jq    '.currentPrice')
+  BEAT=$(echo "$JSON"     | jq    '.priceToBeat')
+  PHASE=$(echo "$JSON"    | jq -r '.phase')
 
-  # 3. Verificar se já foi operado
-  if grep -qx "$MARKET_ID" "$TRADED_FILE" 2>/dev/null; then
-    echo "  → mercado já operado, aguardando próximo..."
-    sleep $POLL_INTERVAL
-    continue
-  fi
+  echo "[$(date '+%H:%M:%S')] market=${MID} | timeLeft=${TIME}s | UP=${UP_P} DOWN=${DOWN_P} | phase=${PHASE}"
 
-  # 4. Verificar se ainda não chegou na janela de entrada
-  if [ "$TIME_LEFT" -gt "$ENTRY_MAX" ]; then
-    WAIT=$(( TIME_LEFT - ENTRY_MAX ))
+  # 2. Validações básicas
+  [ "$OK" != "true" ] && echo "  → ok=false, abortando." && sleep $POLL && continue
+  grep -qx "$MID" "$TRADED" 2>/dev/null && echo "  → mercado já operado." && sleep $POLL && continue
+
+  # 3. Controle de tempo
+  if [ "$TIME" -gt "$ENTRY_MAX" ]; then
+    WAIT=$(( TIME - ENTRY_MAX ))
     echo "  → aguardando ${WAIT}s para janela de entrada..."
-    sleep $POLL_INTERVAL
+    sleep $POLL
     continue
   fi
 
-  # 5. Verificar se já passou da janela de entrada
-  if [ "$TIME_LEFT" -lt "$ENTRY_MIN" ]; then
-    echo "  → janela expirada (${TIME_LEFT}s < ${ENTRY_MIN}s), não operar."
-    sleep $POLL_INTERVAL
+  if [ "$TIME" -lt "$ENTRY_MIN" ]; then
+    echo "  → janela expirada (${TIME}s < ${ENTRY_MIN}s). Aguardando próximo mercado."
+    sleep $POLL
     continue
   fi
 
-  # 6. JANELA DE ENTRADA ATINGIDA — avaliar sinais
-  echo "  → janela atingida! Avaliando sinais..."
+  echo "  → ⏱ JANELA DE ENTRADA! Avaliando sinais..."
 
-  UP_SIGNALS=0
-  DOWN_SIGNALS=0
+  # 4. Avaliar sinais
+  UP_SIG=0; DOWN_SIG=0; TOTAL_SIG=5
 
-  # TA Predict
-  [ "$(echo "$TA_SHORT > 55" | bc -l)" = "1" ] && ((DOWN_SIGNALS++)) || true
-  [ "$(echo "$TA_LONG  > 55" | bc -l)" = "1" ] && ((UP_SIGNALS++))   || true
+  [ "$(echo "$TA_SHORT > 55" | bc -l)" = "1" ] && ((DOWN_SIG++)) || true
+  [ "$(echo "$TA_LONG  > 55" | bc -l)" = "1" ] && ((UP_SIG++))   || true
 
-  # Heiken Ashi
-  [[ "$HEIKEN" == red*   ]] && ((DOWN_SIGNALS++)) || true
-  [[ "$HEIKEN" == green* ]] && ((UP_SIGNALS++))   || true
+  [[ "$HEIKEN" == red*   ]] && ((DOWN_SIG++)) || true
+  [[ "$HEIKEN" == green* ]] && ((UP_SIG++))   || true
 
-  # RSI
-  [ "$(echo "$RSI < 45" | bc -l)" = "1" ] && ((DOWN_SIGNALS++)) || true
-  [ "$(echo "$RSI > 55" | bc -l)" = "1" ] && ((UP_SIGNALS++))   || true
+  [ "$(echo "$RSI < 45" | bc -l)" = "1" ] && ((DOWN_SIG++)) || true
+  [ "$(echo "$RSI > 55" | bc -l)" = "1" ] && ((UP_SIG++))   || true
 
-  # MACD
-  [[ "$MACD" == bearish* ]] && ((DOWN_SIGNALS++)) || true
-  [[ "$MACD" == bullish* ]] && ((UP_SIGNALS++))   || true
+  [[ "$MACD" == bearish* ]] && ((DOWN_SIG++)) || true
+  [[ "$MACD" == bullish* ]] && ((UP_SIG++))   || true
 
-  # currentPrice vs priceToBeat
-  if [ "$CURRENT" != "null" ] && [ "$TO_BEAT" != "null" ]; then
-    [ "$(echo "$CURRENT < $TO_BEAT" | bc -l)" = "1" ] && ((DOWN_SIGNALS++)) || true
-    [ "$(echo "$CURRENT > $TO_BEAT" | bc -l)" = "1" ] && ((UP_SIGNALS++))   || true
+  if [ "$CUR" = "null" ] || [ "$BEAT" = "null" ]; then
+    echo "  → currentPrice/priceToBeat null: sinal 5 desconsiderado (mínimo 3/4)"
+    TOTAL_SIG=4
+  else
+    [ "$(echo "$CUR < $BEAT" | bc -l)" = "1" ] && ((DOWN_SIG++)) || true
+    [ "$(echo "$CUR > $BEAT" | bc -l)" = "1" ] && ((UP_SIG++))   || true
   fi
 
-  echo "  → sinais: UP=${UP_SIGNALS} DOWN=${DOWN_SIGNALS}"
+  MIN_SIG=$([ "$TOTAL_SIG" = "5" ] && echo 4 || echo 3)
+  echo "  → sinais: UP=${UP_SIG} DOWN=${DOWN_SIG} (mínimo: ${MIN_SIG}/${TOTAL_SIG})"
 
-  # 7. Decidir lado
-  SIDE=""
-  SIDE_PRICE=""
+  # 5. Decidir lado
+  SIDE=""; SIDE_PRICE=""
 
-  if [ "$DOWN_SIGNALS" -ge 4 ]; then
-    SIDE="DOWN"
-    SIDE_PRICE="$DOWN_PRICE"
-  elif [ "$UP_SIGNALS" -ge 4 ]; then
-    SIDE="UP"
-    SIDE_PRICE="$UP_PRICE"
+  if [ "$DOWN_SIG" -ge "$MIN_SIG" ] && [ "$DOWN_SIG" -gt "$UP_SIG" ]; then
+    SIDE="DOWN"; SIDE_PRICE="$DOWN_P"
+  elif [ "$UP_SIG" -ge "$MIN_SIG" ] && [ "$UP_SIG" -gt "$DOWN_SIG" ]; then
+    SIDE="UP"; SIDE_PRICE="$UP_P"
   fi
 
   if [ -z "$SIDE" ]; then
-    echo "  → sinais insuficientes. Não operar."
-    sleep $POLL_INTERVAL
+    echo "  → sinais insuficientes ou empatados. Não operar."
+    sleep $POLL
     continue
   fi
 
-  # 8. Verificar faixa de preço
+  # 6. Verificar faixa de preço
   IN_RANGE=$(echo "$SIDE_PRICE >= $PRICE_MIN && $SIDE_PRICE <= $PRICE_MAX" | bc -l)
   if [ "$IN_RANGE" != "1" ]; then
     echo "  → preço ${SIDE_PRICE} fora da faixa [${PRICE_MIN}–${PRICE_MAX}]. Não operar."
-    sleep $POLL_INTERVAL
+    sleep $POLL
     continue
   fi
 
-  # 9. EXECUTAR TRADE
-  echo "  ✅ TRADE: ${SIDE} @ ${SIDE_PRICE} | mercado ${MARKET_ID}"
-  echo "$MARKET_ID" >> "$TRADED_FILE"
+  # 7. TRADE AUTORIZADO
+  echo ""
+  echo "  ✅ TRADE AUTORIZADO"
+  echo "     Lado:    ${SIDE}"
+  echo "     Preço:   ${SIDE_PRICE}"
+  echo "     Mercado: ${MID} (${SLUG})"
+  echo "     Sinais:  UP=${UP_SIG} DOWN=${DOWN_SIG} de ${TOTAL_SIG}"
+  echo ""
 
-  # → Acionar execução no browser (ver Fase 3)
-  EXECUTE_TRADE=true
+  echo "$MID" >> "$TRADED"
   break
+
 done
 ```
 
 ---
 
-### Fase 3 — Execução no browser (após EXECUTE_TRADE=true)
+### Fase 3 — Execução no browser
 
-1. Na Polymarket, localize o mercado usando `marketSlug`.
-2. Entre na página correta do mercado.
-3. Se existir o botão `Go to live market`, clique nele imediatamente.
-4. Se houver contador chegando a zero, aguarde até aparecer `Go to live market` e clique.
-5. Após clicar, aguarde a navegação para o mercado ativo e confirme que a página foi atualizada.
-6. Se `SIDE === "UP"`, clique no outcome `UP` ou `Yes`.
-7. Se `SIDE === "DOWN"`, clique no outcome `DOWN` ou `No`.
-8. Preencha o valor da ordem com **$1**.
-9. Revise o lado, o valor e a confirmação antes de submeter.
-10. Confirme a ordem no navegador.
+1. Abrir `https://polymarket.com/event/${SLUG}` via browser tool, profile `edge-user`.
+2. Se existir botão `Go to live market` → clicar imediatamente.
+3. Aguardar navegação para o mercado ativo.
+4. `SIDE = "UP"` → clicar em `UP` ou `Yes`.
+5. `SIDE = "DOWN"` → clicar em `DOWN` ou `No`.
+6. Preencher valor: **$1**.
+7. Revisar: lado, valor, mercado.
+8. Confirmar a ordem.
 
 ---
 
 ## Regras absolutas
 
-- Nunca invente sinais.
-- Nunca opere se `currentPrice` ou `priceToBeat` vierem nulos.
-- Nunca opere duas vezes no mesmo `marketId`.
-- Nunca opere se `timeLeftSec < 30` ou `timeLeftSec > 55`.
-- Nunca opere se o preço do lado escolhido estiver fora de **0.80 a 0.88**.
-- Nunca opere se menos de **4 dos 5 sinais** apontarem para a mesma direção.
-- Sempre clicar em `Go to live market` se o mercado atual tiver expirado antes de operar.
-- Se a página pedir login, interrompa e peça login manual no Edge do usuário.
-- Se o Edge não estiver acessível via `edge-user`, tente `edge-debug` antes de falhar.
+- `ok = false` → abortar.
+- `currentPrice` ou `priceToBeat` null → desconsiderar sinal 5, exigir 3/4.
+- Nunca operar duas vezes no mesmo `marketId`.
+- Nunca operar fora da janela `30s ≤ timeLeftSec ≤ 55s`.
+- Nunca operar com preço fora de `0.80–0.88`.
+- Nunca inventar sinais nem usar `action`/`side` do indicador.
+- Login pedido pela página → parar e pedir ao usuário.
+- Edge inacessível → tentar `edge-debug` antes de falhar.
 
 ---
 
-## Output obrigatório após execução
+## Output obrigatório
 
-Sempre retorne:
+**A cada iteração do loop:**
+```
+[HH:MM:SS] market=<id> | timeLeft=<N>s | UP=<p> DOWN=<p> | phase=<fase>
+  → sinais: UP=<n> DOWN=<n> (mínimo: <n>/<total>)
+  → <decisão + motivo>
+```
+
+**Após trade executado:**
 1. JSON bruto do indicador no momento do trade
-2. Decisão: lado escolhido, quantidade de sinais UP/DOWN, preço
-3. Resumo do que foi clicado no browser
+2. Lado + preço + sinais
+3. Ações realizadas no browser
 4. Resultado observado na tela
-5. `filterReason` (caso não tenha operado)
-6. `selectedPrice`
