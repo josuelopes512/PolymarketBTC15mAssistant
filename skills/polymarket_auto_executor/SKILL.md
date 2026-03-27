@@ -23,7 +23,7 @@ Use esta skill para rodar o pipeline automático de trading da Polymarket no mac
 
 Procedimento:
 1. Execute:
-   `bash $HOME/source/repos/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh`
+   `bash $HOME/Source/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh`
 2. Leia o JSON retornado.
 3. Retorne o JSON bruto ao usuário sem reinterpretar o sinal.
 
