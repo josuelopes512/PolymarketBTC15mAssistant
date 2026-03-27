@@ -690,6 +690,29 @@ async function main() {
               : ANSI.reset)
         : ANSI.reset;
 
+      // ── SIGNAL section ──────────────────────────────────────────────────────
+      const sigColor = rec.action === "ENTER"
+        ? (rec.side === "UP" ? ANSI.green : ANSI.red)
+        : ANSI.yellow;
+      const sigActionText = rec.action === "ENTER"
+        ? `${sigColor}▶ BUY ${rec.side} · ${rec.phase} · ${rec.strength}${ANSI.reset}`
+        : `${sigColor}⏸ NO TRADE · ${rec.phase}${ANSI.reset}`;
+
+      const edgeUpPct   = edge.edgeUp   !== null ? `${edge.edgeUp   > 0 ? "+" : ""}${(edge.edgeUp   * 100).toFixed(1)}%` : "-";
+      const edgeDownPct = edge.edgeDown !== null ? `${edge.edgeDown > 0 ? "+" : ""}${(edge.edgeDown * 100).toFixed(1)}%` : "-";
+      const edgeUpC   = edge.edgeUp   !== null && edge.edgeUp   > 0 ? ANSI.green : ANSI.red;
+      const edgeDownC = edge.edgeDown !== null && edge.edgeDown > 0 ? ANSI.green : ANSI.red;
+      const edgeDisplayLine = `↑ ${edgeUpC}${edgeUpPct}${ANSI.reset}  |  ↓ ${edgeDownC}${edgeDownPct}${ANSI.reset}`;
+
+      const phaseReq = rec.phase === "EARLY" ? "≥5% edge, ≥55% prob"
+        : rec.phase === "MID"   ? "≥10% edge, ≥60% prob"
+        :                         "≥20% edge, ≥65% prob";
+      const reasonSuffix = rec.action === "NO_TRADE" && rec.reason
+        ? `  (${rec.reason.replace(/_/g, " ")})`
+        : "";
+      const reqDisplayLine = `${ANSI.dim}${phaseReq}${reasonSuffix}${ANSI.reset}`;
+      // ────────────────────────────────────────────────────────────────────────
+
       const lines = [
         titleLine,
         marketLine,
@@ -711,6 +734,12 @@ async function main() {
         settlementLeftMin !== null ? kv("Time left:", `${polyTimeLeftColor}${fmtTimeLeft(settlementLeftMin)}${ANSI.reset}`) : null,
         priceToBeat !== null ? kv("PRICE TO BEAT: ", `$${formatNumber(priceToBeat, 0)}`) : kv("PRICE TO BEAT: ", `${ANSI.gray}-${ANSI.reset}`),
         currentPriceLine,
+        "",
+        sepLine(),
+        "",
+        kv("SIGNAL:", sigActionText),
+        kv("Edge:", edgeDisplayLine),
+        kv("Required:", reqDisplayLine),
         "",
         sepLine(),
         "",
