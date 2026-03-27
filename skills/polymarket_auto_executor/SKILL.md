@@ -24,6 +24,7 @@ Importante:
 - O valor da ordem deve ser sempre de **1 dólar**.
 - Só operar quando faltarem **40 segundos ou menos** para finalizar o mercado.
 - Só operar quando o preço do lado escolhido estiver entre **0.80 e 0.85**.
+- O script `run-openclaw-trade.sh` já deve retornar `browserTradeAllowed`, `selectedPrice`, `fixedStakeUsd` e `filterReason`.
 
 Procedimento:
 
@@ -40,17 +41,9 @@ Procedimento:
 
 4. Leia o JSON retornado pelo indicador.
 
-5. Se `action !== "ENTER"`, pare imediatamente e retorne o JSON bruto sem operar.
+5. Se `browserTradeAllowed !== true`, pare imediatamente e retorne o JSON bruto sem operar.
 
-6. Antes de operar, valide estas condições obrigatórias:
-   - `timeLeftSec` deve ser **menor ou igual a 40**
-   - se `side === "UP"`, então `upPrice` deve estar entre **0.80 e 0.85**
-   - se `side === "DOWN"`, então `downPrice` deve estar entre **0.80 e 0.85**
-   - o valor da ordem deve ser sempre **$1**
-
-7. Se qualquer uma dessas condições não for atendida, pare imediatamente e retorne o JSON bruto sem operar.
-
-8. Se `action === "ENTER"` e `side` for `UP` ou `DOWN`:
+6. Se `browserTradeAllowed === true` e `side` for `UP` ou `DOWN`:
    - Use o browser profile `edge-user`.
    - Na Polymarket, localize o mercado usando `marketSlug`.
    - Entre na página correta do mercado.
@@ -65,7 +58,7 @@ Procedimento:
 
 Regras:
 - Nunca invente sinais.
-- Nunca opere se `action !== "ENTER"`.
+- Nunca opere se `browserTradeAllowed !== true`.
 - Nunca opere se `currentPrice` ou `priceToBeat` vierem nulos.
 - Nunca opere duas vezes no mesmo `marketId`.
 - Nunca opere se faltarem mais de 40 segundos para finalizar.
@@ -78,3 +71,5 @@ Regras:
   1. o JSON bruto do indicador
   2. um resumo do que foi clicado
   3. o resultado observado na tela
+  4. `filterReason`
+  5. `selectedPrice`
