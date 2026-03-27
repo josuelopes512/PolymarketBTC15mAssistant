@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$HOME/source/repos/PolymarketBTC15mAssistant"
+PROJECT_DIR="$HOME/Sources/PolymarketBTC15mAssistant"
 
 export DRY_RUN="${DRY_RUN:-true}"
 export STAKE_USD="${STAKE_USD:-5}"
