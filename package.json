@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "autotrade": "node src/autoTrade.js",
-    "openclaw:trade": "node src/autoTrade.js"
+    "openclaw:trade": "node src/autoTrade.js --mode openclaw"
   },
   "dependencies": {
     "@polymarket/clob-client": "^5.8.1",

@@ -198,6 +198,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
   await main();
 }

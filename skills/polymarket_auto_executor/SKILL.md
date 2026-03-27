@@ -1,6 +1,6 @@
 ---
-name: polymarket-auto-executor
-description: Consults PolymarketBTC15mAssistant JSON output and automatically executes validated trades on Polymarket.
+name: polymarket-browser-trader
+description: Uses PolymarketBTC15mAssistant as an indicator and executes trades in the Polymarket web UI on macOS via OpenClaw browser automation.
 version: 1.0.0
 metadata:
   openclaw:
@@ -9,28 +9,40 @@ metadata:
         - node
         - bash
       env:
-        - POLYMARKET_HOST
-        - CHAIN_ID
-        - PRIVATE_KEY
-        - FUNDER
-        - DRY_RUN
         - STAKE_USD
         - MAX_ENTRY_PRICE
         - MIN_LIQUIDITY
 ---
 
-Use esta skill para rodar o pipeline automático de trading da Polymarket no macOS.
+Use esta skill para fazer trading na Polymarket via navegador no macOS.
 
-Procedimento:
+Fluxo:
 1. Execute:
    `bash $HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh`
+   ou rode diretamente:
+   `node $HOME/Sources/PolymarketBTC15mAssistant/src/index.js`
+
 2. Leia o JSON retornado.
-3. Retorne o JSON bruto ao usuário sem reinterpretar o sinal.
+
+3. Se `action !== "ENTER"`, pare e retorne o JSON bruto.
+
+4. Se `side === "UP"` ou `side === "DOWN"`:
+   - Abra o browser profile `openclaw` ou o profile configurado para sessão logada.
+   - Navegue até `https://polymarket.com`.
+   - Procure o mercado correspondente a `marketSlug`.
+   - Entre na página do mercado.
+   - Clique no outcome correto:
+     - `UP` => botão de compra do lado UP/Yes
+     - `DOWN` => botão de compra do lado DOWN/No
+   - Preencha o valor de stake usando `STAKE_USD`.
+   - Revise preço e quantidade.
+   - Confirme a ordem no navegador.
 
 Regras:
 - Nunca invente sinais.
 - Nunca opere se `action !== "ENTER"`.
-- Nunca opere se os preços vierem nulos.
+- Nunca opere se `currentPrice` ou `priceToBeat` vierem nulos.
 - Nunca opere duas vezes no mesmo `marketId`.
-- Sempre retorne o JSON bruto do resultado.
-- Se houver erro, retorne o erro bruto.
+- Use apenas a UI da Polymarket no browser tool.
+- Sempre retorne um resumo bruto do que foi clicado e do resultado observado na tela.
+- Se a página pedir login, interrompa e peça login manual no browser controlado pelo OpenClaw.

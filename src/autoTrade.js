@@ -4,6 +4,7 @@ import { validateTrade } from "./execution/validateTrade.js";
 import { placeOrder } from "./execution/placeOrder.js";
 import { hasTraded, markTraded } from "./execution/tradeState.js";
 import { logEvent } from "./execution/tradeLogger.js";
+import { pathToFileURL } from "node:url";
 
 function print(obj, code = 0) {
   process.stdout.write(JSON.stringify(obj));
@@ -12,8 +13,57 @@ function print(obj, code = 0) {
   if (code) process.exitCode = code;
 }
 
-async function main() {
+function parseArgs(argv) {
+  const out = { mode: null, markTraded: null };
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === "--mode" || a === "--execution") {
+      out.mode = String(argv[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
+    if (a === "--mode=openclaw" || a === "--execution=openclaw") {
+      out.mode = "openclaw";
+      continue;
+    }
+    if (a === "--mark-traded") {
+      const marketId = String(argv[i + 1] ?? "");
+      const side = String(argv[i + 2] ?? "");
+      const amountUsd = Number(argv[i + 3]);
+      out.markTraded = { marketId, side, amountUsd: Number.isFinite(amountUsd) ? amountUsd : null };
+      i += 3;
+      continue;
+    }
+  }
+  return out;
+}
+
+function toBool(v) {
+  return String(v || "").toLowerCase() === "true";
+}
+
+function computeMarketUrl(marketSlug) {
+  const slug = String(marketSlug || "").trim();
+  if (!slug) return null;
+  return `https://polymarket.com/market/${encodeURIComponent(slug)}`;
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
+  const modeEnv = String(process.env.EXECUTION_MODE || process.env.EXEC_MODE || "").trim().toLowerCase();
+  const modeArg = String(args.mode || "").trim().toLowerCase();
+  const mode = modeArg || modeEnv || "api";
+
   try {
+    if (args.markTraded?.marketId) {
+      const marketId = String(args.markTraded.marketId);
+      const side = args.markTraded.side === "UP" || args.markTraded.side === "DOWN" ? args.markTraded.side : null;
+      const amountUsd = Number.isFinite(args.markTraded.amountUsd) ? args.markTraded.amountUsd : null;
+      markTraded(marketId, { side, amountUsd, status: "ok", source: "manual" });
+      print({ ok: true, marked: true, marketId, side, amountUsd });
+      return;
+    }
+
     const signal = await runDecisionCycle();
     if (!signal || signal.ok !== true) {
       const out = { ok: false, error: signal?.error ?? "signal_error" };
@@ -35,6 +85,31 @@ async function main() {
       print(out);
       return;
     }
+
+    if (mode === "openclaw" || toBool(process.env.OPENCLAW)) {
+      const marketUrl = computeMarketUrl(norm.marketSlug);
+      const out = {
+        ok: true,
+        traded: false,
+        executionMode: "openclaw",
+        action: signal.action,
+        side: norm.side,
+        marketId: norm.marketId,
+        marketSlug: norm.marketSlug,
+        marketUrl,
+        amountUsd: norm.amountUsd,
+        expectedPrice: norm.expectedPrice,
+        signal,
+        validation,
+        postSuccess: {
+          markTradedArgs: ["--mark-traded", norm.marketId, norm.side, String(norm.amountUsd)]
+        }
+      };
+      logEvent({ signal, validation, orderRequest: norm, orderResult: { ok: true, executionMode: "openclaw", marketUrl }, error: null });
+      print(out);
+      return;
+    }
+
     const order = await placeOrder({
       marketId: norm.marketId,
       marketSlug: norm.marketSlug,
@@ -58,4 +133,7 @@ async function main() {
   }
 }
 
-await main();
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+  await main();
+}
