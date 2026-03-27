@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "autotrade": "node src/autoTrade.js",
+    "openclaw:trade": "node src/autoTrade.js"
   },
   "dependencies": {
     "@polymarket/clob-client": "^5.8.1",
