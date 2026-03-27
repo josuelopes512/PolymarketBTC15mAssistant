@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import "dotenv/config";
 
 function toBool(v) {
   return String(v || "").toLowerCase() === "true";

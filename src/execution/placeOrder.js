@@ -2,6 +2,7 @@ import { ClobClient, OrderType, Side } from "@polymarket/clob-client";
 import { ethers } from "ethers";
 import { CONFIG } from "../config.js";
 import { resolveMarket, pickOutcomeTokenId } from "./resolveMarket.js";
+import "dotenv/config";
 
 function n(x) {
   const v = Number(x);
