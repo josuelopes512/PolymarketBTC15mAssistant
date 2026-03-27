@@ -16,29 +16,37 @@ metadata:
 
 Use esta skill para fazer trading na Polymarket via navegador no macOS usando a sessão existente do Microsoft Edge do usuário.
 
-Pré-condições:
-- O Microsoft Edge deve estar aberto com remote debugging habilitado.
-- O OpenClaw deve usar o browser profile `edge-user`.
-- O usuário já deve estar logado na Polymarket no Edge.
-- O projeto deve estar em `$HOME/Sources/PolymarketBTC15mAssistant`.
+Importante:
+- Use sempre o browser profile `edge-user`.
+- Nunca use o profile `openclaw`.
+- O indicador apenas consulta o sinal; a execução da ordem deve ser feita pela UI da Polymarket no navegador.
+- Se o Edge ainda não estiver acessível via `edge-user`, inicie o Edge com remote debugging usando `exec`.
 
-Fluxo:
-1. Execute:
+Procedimento:
+
+1. Primeiro, garanta que o Microsoft Edge do usuário esteja disponível para o browser tool.
+   Se o profile `edge-user` ainda não responder, execute via `exec`:
+
+   `edge-debug`
+
+2. Depois use o browser tool com o profile `edge-user` para abrir:
+   `https://polymarket.com`
+
+3. Rode o indicador:
    `bash $HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh`
 
-2. Leia o JSON retornado.
+4. Leia o JSON retornado pelo indicador.
 
-3. Se `action !== "ENTER"`, pare e retorne o JSON bruto sem operar.
+5. Se `action !== "ENTER"`, pare imediatamente e retorne o JSON bruto sem operar.
 
-4. Se `action === "ENTER"` e `side` for `UP` ou `DOWN`:
-   - Use sempre o browser profile `edge-user`.
-   - Abra `https://polymarket.com`.
-   - Localize o mercado usando `marketSlug`.
+6. Se `action === "ENTER"` e `side` for `UP` ou `DOWN`:
+   - Use o browser profile `edge-user`.
+   - Na Polymarket, localize o mercado usando `marketSlug`.
    - Entre na página correta do mercado.
    - Se `side === "UP"`, clique no outcome `UP` ou `Yes`.
    - Se `side === "DOWN"`, clique no outcome `DOWN` ou `No`.
-   - Preencha o valor usando `STAKE_USD`.
-   - Revise o lado, o valor e a tela de confirmação.
+   - Preencha o valor da ordem usando `STAKE_USD`.
+   - Revise o lado, o valor e a confirmação.
    - Confirme a ordem no navegador.
 
 Regras:
@@ -46,8 +54,10 @@ Regras:
 - Nunca opere se `action !== "ENTER"`.
 - Nunca opere se `currentPrice` ou `priceToBeat` vierem nulos.
 - Nunca opere duas vezes no mesmo `marketId`.
-- Nunca use o profile `openclaw`; use sempre `edge-user`.
 - Use apenas a UI da Polymarket no browser tool.
-- Sempre retorne um resumo bruto do que foi clicado e do resultado observado na tela.
 - Se a página pedir login, interrompa e peça login manual no Edge do usuário.
-- Se o Edge não estiver acessível via `edge-user`, interrompa com erro em vez de abrir um novo navegador.
+- Se o Edge não estiver acessível via `edge-user`, tente iniciar o Edge com remote debugging antes de falhar.
+- Sempre retorne:
+  1. o JSON bruto do indicador
+  2. um resumo do que foi clicado
+  3. o resultado observado na tela
