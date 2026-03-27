@@ -3,8 +3,11 @@ POLL=3
 ENTRY_MIN=30
 ENTRY_MAX=55
 PRICE_MIN=0.80
-PRICE_MAX=0.88
+PRICE_MAX="${MAX_ENTRY_PRICE:-0.88}"
+STAKE="${STAKE_USD:-1}"
 TRADED="$HOME/.polymarket-traded-markets"
+
+touch "$TRADED"
 
 while true; do
 
@@ -26,7 +29,7 @@ while true; do
   CUR=$(echo "$JSON"      | jq    '.currentPrice')
   BEAT=$(echo "$JSON"     | jq    '.priceToBeat')
 
-  echo "[$(date '+%H:%M:%S')] market=${MID} | timeLeft=${TIME}s | UP=${UP_P} DOWN=${DOWN_P}"
+  echo "[$(date '+%H:%M:%S')] market=${MID} | timeLeft=${TIME}s | UP=${UP_P} DOWN=${DOWN_P} | stake=\$${STAKE}"
 
   # ── Validação básica ─────────────────────────────────────────
   [ "$OK" != "true" ] && echo "  → ok=false, abortando." && sleep $POLL && continue
@@ -107,6 +110,7 @@ while true; do
   echo "  ✅ TRADE AUTORIZADO"
   echo "     Lado:    ${SIDE}"
   echo "     Preço:   ${SIDE_PRICE}"
+  echo "     Stake:   \$${STAKE}"
   echo "     Mercado: ${MID} (${SLUG})"
   echo "     Sinais:  UP=${UP_SIG} DOWN=${DOWN_SIG} de ${TOTAL_SIG}"
   echo ""
