@@ -255,11 +255,25 @@ done
 
 ---
 
-### Fase 2 — Executar o script de monitoramento
+### Fase 2 — Executar o watcher de notificações e o script de monitoramento
+
+Sempre iniciar os dois processos em paralelo (background + foreground):
 
 ```bash
+# Watcher: notifica no Telegram a cada nova janela de mercado
+bash "$HOME/Sources/PolymarketBTC15mAssistant/scripts/notify-new-market.sh" &
+WATCHER_PID=$!
+echo "[$(date '+%H:%M:%S')] Watcher iniciado (PID=${WATCHER_PID})"
+
+# Monitor principal: avalia sinais e executa trades
 bash "$HOME/Sources/PolymarketBTC15mAssistant/scripts/run-monitoring-trade.sh"
+
+# Encerrar watcher quando o monitor terminar
+kill $WATCHER_PID 2>/dev/null
 ```
+
+> O `notify-new-market.sh` detecta mudança de `marketSlug` e envia mensagem direto no Telegram via Bot API a cada nova janela de 5 minutos.
+> Variáveis opcionais: `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (defaults já configurados no script).
 
 > O `run-monitoring-trade.sh` deve implementar exatamente a mesma política do fallback inline abaixo.
 > O fallback inline é a **referência canônica de comportamento**.
