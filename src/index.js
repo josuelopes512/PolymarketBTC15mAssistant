@@ -18,14 +18,15 @@ import { computeRsi, sma, slopeLast } from "./indicators/rsi.js";
 import { computeMacd } from "./indicators/macd.js";
 import { computeHeikenAshi, countConsecutive } from "./indicators/heikenAshi.js";
 import { detectRegime } from "./engines/regime.js";
-import { scoreDirection, applyTimeAwareness } from "./engines/probability.js";
-import { computeEdge, decide } from "./engines/edge.js";
+import { scoreDirection, applyTimeAwareness } from "./engine/probability.js";
+import { computeEdge, decide } from "./engine/edge.js";
 import { appendCsvRow, formatNumber, formatPct, getCandleWindowTiming, sleep } from "./utils.js";
 import { startBinanceTradeStream } from "./data/binanceWs.js";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
+import { runDecisionCycle } from "./decisionRunner.js";
 
 function countVwapCrosses(closes, vwapSeries, lookback) {
   if (closes.length < lookback || vwapSeries.length < lookback) return null;
@@ -397,6 +398,27 @@ async function fetchPolymarketSnapshot() {
 }
 
 async function main() {
+  const outputJson = String(process.env.POLY_OUTPUT_JSON || "").toLowerCase() === "true";
+  const singleShot = String(process.env.POLY_SINGLE_SHOT || "").toLowerCase() === "true";
+
+  if (outputJson) {
+    while (true) {
+      try {
+        const result = await runDecisionCycle();
+        process.stdout.write(JSON.stringify(result));
+        process.stdout.write("\n");
+        if (singleShot) return;
+      } catch (err) {
+        process.stdout.write(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
+        process.stdout.write("\n");
+        process.exitCode = 1;
+        return;
+      }
+
+      await sleep(CONFIG.pollIntervalMs);
+    }
+  }
+
   const binanceStream = startBinanceTradeStream({ symbol: CONFIG.symbol });
   const polymarketLiveStream = startPolymarketChainlinkPriceStream({});
   const chainlinkStream = startChainlinkPriceStream({});

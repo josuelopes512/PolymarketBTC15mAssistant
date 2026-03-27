@@ -21,6 +21,20 @@ export async function fetchMarketBySlug(slug) {
   return market;
 }
 
+export async function fetchMarketById(marketId) {
+  const url = new URL("/markets", CONFIG.gammaBaseUrl);
+  url.searchParams.set("id", String(marketId));
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Gamma markets(id) error: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  const market = Array.isArray(data) ? data[0] : data;
+  return market ?? null;
+}
+
 export async function fetchMarketsBySeriesSlug({ seriesSlug, limit = 50 }) {
   const url = new URL("/markets", CONFIG.gammaBaseUrl);
   url.searchParams.set("seriesSlug", seriesSlug);
@@ -197,5 +211,124 @@ export function summarizeOrderBook(book, depthLevels = 5) {
     spread,
     bidLiquidity,
     askLiquidity
+  };
+}
+
+const marketCache = {
+  market: null,
+  fetchedAtMs: 0
+};
+
+export async function resolveCurrentBtc15mMarket() {
+  if (CONFIG.polymarket.marketSlug) {
+    return await fetchMarketBySlug(CONFIG.polymarket.marketSlug);
+  }
+
+  if (!CONFIG.polymarket.autoSelectLatest) return null;
+
+  const now = Date.now();
+  if (marketCache.market && now - marketCache.fetchedAtMs < CONFIG.pollIntervalMs) {
+    return marketCache.market;
+  }
+
+  const events = await fetchLiveEventsBySeriesId({ seriesId: CONFIG.polymarket.seriesId, limit: 25 });
+  const markets = flattenEventMarkets(events);
+  const picked = pickLatestLiveMarket(markets);
+
+  marketCache.market = picked;
+  marketCache.fetchedAtMs = now;
+  return picked;
+}
+
+export async function fetchPolymarketSnapshot() {
+  const market = await resolveCurrentBtc15mMarket();
+
+  if (!market) return { ok: false, reason: "market_not_found" };
+
+  const outcomes = Array.isArray(market.outcomes) ? market.outcomes : (typeof market.outcomes === "string" ? JSON.parse(market.outcomes) : []);
+  const outcomePrices = Array.isArray(market.outcomePrices)
+    ? market.outcomePrices
+    : (typeof market.outcomePrices === "string" ? JSON.parse(market.outcomePrices) : []);
+
+  const clobTokenIds = Array.isArray(market.clobTokenIds)
+    ? market.clobTokenIds
+    : (typeof market.clobTokenIds === "string" ? JSON.parse(market.clobTokenIds) : []);
+
+  let upTokenId = null;
+  let downTokenId = null;
+  for (let i = 0; i < outcomes.length; i += 1) {
+    const label = String(outcomes[i]);
+    const tokenId = clobTokenIds[i] ? String(clobTokenIds[i]) : null;
+    if (!tokenId) continue;
+
+    if (label.toLowerCase() === CONFIG.polymarket.upOutcomeLabel.toLowerCase()) upTokenId = tokenId;
+    if (label.toLowerCase() === CONFIG.polymarket.downOutcomeLabel.toLowerCase()) downTokenId = tokenId;
+  }
+
+  const upIndex = outcomes.findIndex((x) => String(x).toLowerCase() === CONFIG.polymarket.upOutcomeLabel.toLowerCase());
+  const downIndex = outcomes.findIndex((x) => String(x).toLowerCase() === CONFIG.polymarket.downOutcomeLabel.toLowerCase());
+
+  const gammaYes = upIndex >= 0 ? Number(outcomePrices[upIndex]) : null;
+  const gammaNo = downIndex >= 0 ? Number(outcomePrices[downIndex]) : null;
+
+  if (!upTokenId || !downTokenId) {
+    return {
+      ok: false,
+      reason: "missing_token_ids",
+      market,
+      outcomes,
+      clobTokenIds,
+      outcomePrices
+    };
+  }
+
+  let upBuy = null;
+  let downBuy = null;
+  let upBookSummary = { bestBid: null, bestAsk: null, spread: null, bidLiquidity: null, askLiquidity: null };
+  let downBookSummary = { bestBid: null, bestAsk: null, spread: null, bidLiquidity: null, askLiquidity: null };
+
+  try {
+    const [yesBuy, noBuy, upBook, downBook] = await Promise.all([
+      fetchClobPrice({ tokenId: upTokenId, side: "buy" }),
+      fetchClobPrice({ tokenId: downTokenId, side: "buy" }),
+      fetchOrderBook({ tokenId: upTokenId }),
+      fetchOrderBook({ tokenId: downTokenId })
+    ]);
+
+    upBuy = yesBuy;
+    downBuy = noBuy;
+    upBookSummary = summarizeOrderBook(upBook);
+    downBookSummary = summarizeOrderBook(downBook);
+  } catch {
+    upBuy = null;
+    downBuy = null;
+    upBookSummary = {
+      bestBid: Number(market.bestBid) || null,
+      bestAsk: Number(market.bestAsk) || null,
+      spread: Number(market.spread) || null,
+      bidLiquidity: null,
+      askLiquidity: null
+    };
+    downBookSummary = {
+      bestBid: null,
+      bestAsk: null,
+      spread: Number(market.spread) || null,
+      bidLiquidity: null,
+      askLiquidity: null
+    };
+  }
+
+  return {
+    ok: true,
+    market,
+    tokens: { upTokenId, downTokenId },
+    prices: {
+      up: upBuy ?? gammaYes,
+      down: downBuy ?? gammaNo
+    },
+    orderbook: {
+      up: upBookSummary,
+      down: downBookSummary
+    }
   };
 }
