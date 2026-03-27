@@ -43,6 +43,9 @@ Procedimento:
    - Use o browser profile `edge-user`.
    - Na Polymarket, localize o mercado usando `marketSlug`.
    - Entre na página correta do mercado.
+   - Se existir o botão `Go to live market`, clique nele imediatamente antes de qualquer ação.
+   - Se houver contador chegando a zero, aguarde até aparecer `Go to live market` e clique.
+   - Após clicar, aguarde a navegação para o mercado ativo e confirme que a página foi atualizada.
    - Se `side === "UP"`, clique no outcome `UP` ou `Yes`.
    - Se `side === "DOWN"`, clique no outcome `DOWN` ou `No`.
    - Preencha o valor da ordem usando `STAKE_USD`.
@@ -55,6 +58,7 @@ Regras:
 - Nunca opere se `currentPrice` ou `priceToBeat` vierem nulos.
 - Nunca opere duas vezes no mesmo `marketId`.
 - Use apenas a UI da Polymarket no browser tool.
+- Sempre clicar em `Go to live market` se o mercado atual tiver expirado antes de operar.
 - Se a página pedir login, interrompa e peça login manual no Edge do usuário.
 - Se o Edge não estiver acessível via `edge-user`, tente iniciar o Edge com remote debugging antes de falhar.
 - Sempre retorne:
