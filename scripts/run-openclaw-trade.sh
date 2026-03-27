@@ -17,7 +17,15 @@ fi
 
 cd "$PROJECT_DIR"
 
-RAW_JSON="$(node src/autoTrade.js --mode openclaw)"
+RAW_JSON="$(node -e "
+import('./src/decisionRunner.js').then(async m => {
+  const result = await m.runDecisionCycle();
+  process.stdout.write(JSON.stringify(result));
+}).catch(e => {
+  process.stdout.write(JSON.stringify({ok: false, error: e.message}));
+  process.exit(1);
+});
+")"
 
 FILTERED_JSON="$(
   echo "$RAW_JSON" | node -e '
