@@ -1,7 +1,7 @@
 ---
 name: polymarket-browser-trader
 description: Monitora continuamente mercados Polymarket BTC Up/Down 5m e executa o trade automaticamente quando a janela de entrada for atingida, usando a sessão existente do Microsoft Edge do usuário.
-version: 1.9.1
+version: 1.9.2
 metadata:
   openclaw:
     requires:
@@ -154,11 +154,12 @@ Função de validação usada antes de qualquer comparação:
 
 ```bash
 is_numeric() {
-  # Retorna 1 se o valor é numérico real (não "null", não vazio, não lixo textual)
+  # Retorna 0 (sucesso) se o valor é numérico (inteiro ou decimal, positivo ou negativo)
+  # Usa regex — fix do bug de decimais com awk em macOS
   local v="$1"
   [ -z "$v" ] && return 1
   [ "$v" = "null" ] && return 1
-  echo "$v" | awk '{if($0+0==$0 && $0!="") exit 0; else exit 1}' 2>/dev/null
+  [[ "$v" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && return 0 || return 1
 }
 ```
 
@@ -273,7 +274,8 @@ kill $WATCHER_PID 2>/dev/null
 ```
 
 > O `notify-new-market.sh` detecta mudança de `marketSlug` e envia mensagem direto no Telegram via Bot API a cada nova janela de 5 minutos.
-> Variáveis opcionais: `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (defaults já configurados no script).
+> Variáveis opcionais: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `POLYMARKET_SESSION_MAX` (padrão: 7200s = 2h).
+> O watcher faz auto-restart ao atingir `SESSION_MAX` e encerra após `FAIL_MAX=20` falhas técnicas consecutivas.
 
 > O `run-monitoring-trade.sh` deve implementar exatamente a mesma política do fallback inline abaixo.
 > O fallback inline é a **referência canônica de comportamento**.
@@ -299,7 +301,7 @@ LOG="$HOME/polymarket-monitor.log"
 INDICATOR_STDERR="$HOME/polymarket-indicator-errors.log"
 
 SESSION_START=$(date +%s)
-SESSION_MAX=1800
+SESSION_MAX="${POLYMARKET_SESSION_MAX:-7200}"  # padrão 2h; configurável via env
 FAIL_COUNT=0
 FAIL_MAX=20
 
@@ -335,8 +337,8 @@ while true; do
   NOW=$(date +%s)
   ELAPSED=$(( NOW - SESSION_START ))
   if [ "$ELAPSED" -gt "$SESSION_MAX" ]; then
-    echo "[$(date '+%H:%M:%S')] [ERROR_SESSION_TIMEOUT] Sessão encerrada após ${ELAPSED}s (máx ${SESSION_MAX}s)." | tee -a "$LOG"
-    exit 0
+    echo "[$(date '+%H:%M:%S')] [ERROR_SESSION_TIMEOUT] Sessão encerrada após ${ELAPSED}s (máx ${SESSION_MAX}s). Reiniciando..." | tee -a "$LOG"
+    exec "$0" "$@"  # auto-restart: substitui o processo atual por uma nova instância
   fi
 
   # ── Consultar indicador ──────────────────────────────────────
@@ -361,25 +363,22 @@ while true; do
   FAIL_COUNT=0
 
   # ── Extrair campos em uma única chamada jq ───────────────────
-  read -r OK TIME MID SLUG UP_P DOWN_P LIQ TA_LONG TA_SHORT HEIKEN RSI MACD CUR BEAT NODE_SIDE <<< "$(
-    echo "$RAW" | jq -r '[
-      .ok,
-      (.timeLeftSec // "null"),
-      (.marketId // ""),
-      (.marketSlug // ""),
-      (.upPrice // "null"),
-      (.downPrice // "null"),
-      (.liquidity // "null"),
-      (.taLongPct // "null"),
-      (.taShortPct // "null"),
-      ((.heiken // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")),
-      (.rsi // "null"),
-      ((.macd // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")),
-      (.currentPrice // "null"),
-      (.priceToBeat // "null"),
-      (.side // "null")
-    ] | @tsv'
-  )"
+  # Extrair campos individualmente — fix bug @tsv com espaços em campos como "bearish (expanding)"
+  OK=$(echo "$RAW"       | jq -r '.ok // "false"')
+  TIME=$(echo "$RAW"     | jq -r '.timeLeftSec // "null"')
+  MID=$(echo "$RAW"      | jq -r '.marketId // ""')
+  SLUG=$(echo "$RAW"     | jq -r '.marketSlug // ""')
+  UP_P=$(echo "$RAW"     | jq -r '.upPrice // "null"')
+  DOWN_P=$(echo "$RAW"   | jq -r '.downPrice // "null"')
+  LIQ=$(echo "$RAW"      | jq -r '.liquidity // "null"')
+  TA_LONG=$(echo "$RAW"  | jq -r '.taLongPct // "null"')
+  TA_SHORT=$(echo "$RAW" | jq -r '.taShortPct // "null"')
+  HEIKEN=$(echo "$RAW"   | jq -r '(.heiken // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")')
+  RSI=$(echo "$RAW"      | jq -r '.rsi // "null"')
+  MACD=$(echo "$RAW"     | jq -r '(.macd // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")')
+  CUR=$(echo "$RAW"      | jq -r '.currentPrice // "null"')
+  BEAT=$(echo "$RAW"     | jq -r '.priceToBeat // "null"')
+  NODE_SIDE=$(echo "$RAW"| jq -r '.side // "null"')
 
   EXEC_ID="$(date '+%Y%m%d%H%M%S')-${MID:-unknown}"
 

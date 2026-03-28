@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# run-monitoring-trade.sh — v1.9.1
-# Referência canônica: SKILL.md polymarket-browser-trader v1.9.1
+# run-monitoring-trade.sh — v1.9.2
+# Referência canônica: SKILL.md polymarket-browser-trader v1.9.2
 
 INDICATOR="$HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh"
 POLL=3
@@ -17,7 +17,7 @@ LOG="$HOME/polymarket-monitor.log"
 INDICATOR_STDERR="$HOME/polymarket-indicator-errors.log"
 
 SESSION_START=$(date +%s)
-SESSION_MAX=1800
+SESSION_MAX="${POLYMARKET_SESSION_MAX:-7200}"  # padrão 2h, configurável
 FAIL_COUNT=0
 FAIL_MAX=20
 
@@ -31,7 +31,7 @@ for F in "$LOG" "$INDICATOR_STDERR"; do
   fi
 done
 
-# ── Função de validação numérica ─────────────────────────────
+# ── Função de validação numérica (regex — fix decimal) ────────
 is_numeric() {
   local v="$1"
   [ -z "$v" ] && return 1
@@ -62,8 +62,8 @@ while true; do
   NOW=$(date +%s)
   ELAPSED=$(( NOW - SESSION_START ))
   if [ "$ELAPSED" -gt "$SESSION_MAX" ]; then
-    echo "[$(date '+%H:%M:%S')] [ERROR_SESSION_TIMEOUT] Sessão encerrada após ${ELAPSED}s (máx ${SESSION_MAX}s)." | tee -a "$LOG"
-    exit 0
+    echo "[$(date '+%H:%M:%S')] [ERROR_SESSION_TIMEOUT] Sessão encerrada após ${ELAPSED}s (máx ${SESSION_MAX}s). Reiniciando..." | tee -a "$LOG"
+    exec "$0" "$@"  # auto-restart
   fi
 
   # ── Consultar indicador ──────────────────────────────────────
@@ -74,7 +74,7 @@ while true; do
     ((FAIL_COUNT++)) || true
     echo "[$(date '+%H:%M:%S')] [ERROR_INDICATOR_FAILED] exit=${EXIT_CODE} falhas=${FAIL_COUNT}/${FAIL_MAX}" | tee -a "$LOG"
     if [ "$FAIL_COUNT" -ge "$FAIL_MAX" ]; then
-      echo "[$(date '+%H:%M:%S')] [ERROR_FAIL_LIMIT] Encerrando." | tee -a "$LOG"
+      echo "[$(date '+%H:%M:%S')] [ERROR_FAIL_LIMIT] Limite de falhas atingido. Encerrando." | tee -a "$LOG"
       exit 1
     fi
     sleep $POLL; continue
@@ -85,7 +85,7 @@ while true; do
     ((FAIL_COUNT++)) || true
     echo "[$(date '+%H:%M:%S')] [ERROR_JSON_INVALID] falhas=${FAIL_COUNT}/${FAIL_MAX}" | tee -a "$LOG"
     if [ "$FAIL_COUNT" -ge "$FAIL_MAX" ]; then
-      echo "[$(date '+%H:%M:%S')] [ERROR_FAIL_LIMIT] Encerrando." | tee -a "$LOG"
+      echo "[$(date '+%H:%M:%S')] [ERROR_FAIL_LIMIT] Limite de falhas atingido. Encerrando." | tee -a "$LOG"
       exit 1
     fi
     sleep $POLL; continue
@@ -93,26 +93,22 @@ while true; do
 
   FAIL_COUNT=0
 
-  # ── Extrair campos em uma única chamada jq ───────────────────
-  read -r OK TIME MID SLUG UP_P DOWN_P LIQ TA_LONG TA_SHORT HEIKEN RSI MACD CUR BEAT NODE_SIDE <<< "$(
-    echo "$RAW" | jq -r '[
-      .ok,
-      (.timeLeftSec // "null"),
-      (.marketId // ""),
-      (.marketSlug // ""),
-      (.upPrice // "null"),
-      (.downPrice // "null"),
-      (.liquidity // "null"),
-      (.taLongPct // "null"),
-      (.taShortPct // "null"),
-      ((.heiken // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")),
-      (.rsi // "null"),
-      ((.macd // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")),
-      (.currentPrice // "null"),
-      (.priceToBeat // "null"),
-      (.side // "null")
-    ] | @tsv'
-  )"
+  # ── Extrair campos individualmente (fix bug @tsv com espaços) ─
+  OK=$(echo "$RAW"       | jq -r '.ok // "false"')
+  TIME=$(echo "$RAW"     | jq -r '.timeLeftSec // "null"')
+  MID=$(echo "$RAW"      | jq -r '.marketId // ""')
+  SLUG=$(echo "$RAW"     | jq -r '.marketSlug // ""')
+  UP_P=$(echo "$RAW"     | jq -r '.upPrice // "null"')
+  DOWN_P=$(echo "$RAW"   | jq -r '.downPrice // "null"')
+  LIQ=$(echo "$RAW"      | jq -r '.liquidity // "null"')
+  TA_LONG=$(echo "$RAW"  | jq -r '.taLongPct // "null"')
+  TA_SHORT=$(echo "$RAW" | jq -r '.taShortPct // "null"')
+  HEIKEN=$(echo "$RAW"   | jq -r '(.heiken // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")')
+  RSI=$(echo "$RAW"      | jq -r '.rsi // "null"')
+  MACD=$(echo "$RAW"     | jq -r '(.macd // "") | ascii_downcase | ltrimstr(" ") | rtrimstr(" ")')
+  CUR=$(echo "$RAW"      | jq -r '.currentPrice // "null"')
+  BEAT=$(echo "$RAW"     | jq -r '.priceToBeat // "null"')
+  NODE_SIDE=$(echo "$RAW"| jq -r '.side // "null"')
 
   EXEC_ID="$(date '+%Y%m%d%H%M%S')-${MID:-unknown}"
 
@@ -199,7 +195,7 @@ while true; do
     echo "  [REJECT_SIGNAL_FIELD_INVALID] sinal 3 (RSI): rsi='${RSI}'" | tee -a "$LOG"
   fi
 
-  # Sinal 4: MACD
+  # Sinal 4: MACD (apenas prefixo — ignora sufixo como "(expanding)")
   if [ -n "$MACD" ] && [ "$MACD" != "null" ]; then
     ((TOTAL_SIG++)) || true
     [[ "$MACD" == bearish* ]] && ((DOWN_SIG++)) || true
@@ -290,6 +286,6 @@ while true; do
   audit_write "$EXEC_ID" "$MID" "$SLUG" "$SIDE" "$SIDE_PRICE" "$STAKE" "$DRY" "AUTHORIZED"
   AUTHORIZED_MID=""; AUTHORIZED_EXEC_ID=""
 
-  break  # vai para execução no browser (Fase 3 gerenciada pela skill)
+  break  # vai para Fase 3 (gerenciada pela skill)
 
 done
