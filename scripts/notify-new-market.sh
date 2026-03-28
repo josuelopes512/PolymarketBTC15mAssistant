@@ -2,8 +2,8 @@
 # notify-new-market.sh — Watcher de nova janela Polymarket BTC 5m
 # Detecta mudança de marketSlug e notifica via Telegram Bot API
 
-BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-8538888878:AAGM7BrSighywVfuHSFkV5XE-BM2S75Oszw}"
-CHAT_ID="${TELEGRAM_CHAT_ID:-515489999}"
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
+CHAT_ID="${TELEGRAM_CHAT_ID}"
 INDICATOR="$HOME/Sources/PolymarketBTC15mAssistant/scripts/run-openclaw-trade.sh"
 POLL=4
 LAST_SLUG=""
